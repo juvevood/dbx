@@ -1100,11 +1100,14 @@ function deleteConnection() {
 async function confirmDelete() {
   const targets = connectionDeleteTargets();
   if (!targets.length) return;
+  const connectionIds = targets.map((target) => target.connectionId);
   try {
-    for (const target of targets) {
-      await connectionStore.disconnect(target.connectionId);
+    await connectionStore.removeConnections(connectionIds);
+    for (const connectionId of connectionIds) {
+      connectionStore.disconnect(connectionId).catch((error) => {
+        console.warn("[DBX][connection:delete:disconnect-failed]", { connectionId, error });
+      });
     }
-    await connectionStore.removeConnections(targets.map((target) => target.connectionId));
     toast(targets.length > 1 ? t("connection.deletedSelected", { count: targets.length }) : t("connection.deleted"), 2000);
   } catch (e: any) {
     toast(t("connection.saveFailed", { message: e?.message || String(e) }), 5000);
