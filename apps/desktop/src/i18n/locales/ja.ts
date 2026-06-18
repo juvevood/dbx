@@ -1337,6 +1337,7 @@ export default {
     nullable: "NULL許容",
     primaryKey: "主キー",
     defaultValue: "デフォルト",
+    defaultValuePresets: "デフォルト値プリセット",
     comment: "コメント",
     editComment: "コメントを編集",
     commentPlaceholder: "列コメントを入力...",

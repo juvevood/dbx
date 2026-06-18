@@ -1236,6 +1236,7 @@ export default {
     nullable: "Nullabile",
     primaryKey: "Chiave Primaria",
     defaultValue: "Valore Predefinito",
+    defaultValuePresets: "Preimpostazioni valore predefinito",
     comment: "Commento",
     editComment: "Modifica commento",
     commentPlaceholder: "Inserisci commento colonna...",

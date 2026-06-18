@@ -1120,6 +1120,7 @@ export default {
     nullable: "Admite nulos",
     primaryKey: "Clave primaria",
     defaultValue: "Valor por defecto",
+    defaultValuePresets: "Valores predeterminados preestablecidos",
     comment: "Comentario",
     editComment: "Editar comentario",
     commentPlaceholder: "Ingresar comentario de columna...",

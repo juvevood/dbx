@@ -1349,6 +1349,7 @@ export default {
     nullable: "Nullable",
     primaryKey: "Primary Key",
     defaultValue: "Default",
+    defaultValuePresets: "Default value presets",
     comment: "Comment",
     editComment: "Edit comment",
     commentPlaceholder: "Enter column comment...",

@@ -1348,6 +1348,7 @@ export default {
     nullable: "可为空",
     primaryKey: "主键",
     defaultValue: "默认值",
+    defaultValuePresets: "默认值预设",
     comment: "注释",
     editComment: "编辑注释",
     commentPlaceholder: "输入字段注释...",

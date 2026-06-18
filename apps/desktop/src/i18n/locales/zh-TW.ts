@@ -1217,6 +1217,7 @@ export default {
     nullable: "可為空",
     primaryKey: "主鍵",
     defaultValue: "預設值",
+    defaultValuePresets: "預設值預設",
     comment: "註解",
     editComment: "編輯註解",
     commentPlaceholder: "輸入欄位註解……",
