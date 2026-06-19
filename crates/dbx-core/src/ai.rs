@@ -436,12 +436,13 @@ fn is_kimi_model(model: &str) -> bool {
 }
 
 pub fn supports_temperature(config: &AiConfig) -> bool {
-    !(is_openai_api_config(config) && is_openai_reasoning_model(&config.model)) && !is_kimi_model(&config.model)
+    !(is_openai_api_config(config) && is_openai_reasoning_model(&config.model))
 }
 
 pub fn add_temperature_if_supported(body: &mut serde_json::Value, request: &AiCompletionRequest) {
     if supports_temperature(&request.config) {
-        body["temperature"] = json!(request.temperature.unwrap_or(0.2));
+        let default_temp = if is_kimi_model(&request.config.model) { 1.0 } else { 0.2 };
+        body["temperature"] = json!(request.temperature.unwrap_or(default_temp));
     }
 }
 
