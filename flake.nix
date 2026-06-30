@@ -146,61 +146,6 @@
           '';
         };
 
-        # ------------------------------------------------------------------ #
-        # packages.dbx-web — Nix package for the web/server binary            #
-        # Build with: nix build .#dbx-web                                     #
-        # ------------------------------------------------------------------ #
-        packages.dbx-web = pkgs.rustPlatform.buildRustPackage {
-          pname = "dbx-web";
-          version = "0.5.41";
-
-          src = pkgs.lib.cleanSource ./.;
-
-          cargoLock = {
-            lockFile = ./Cargo.lock;
-            # Patch sources referenced in Cargo.lock that come from git.
-            # Keys must match the `name-version` of the *first* crate from each git repo.
-            outputHashes = {
-              # github.com/t8y2/tokio-postgres-gaussdb (branch=master, commit 8d50bef)
-              "tokio-postgres-0.7.17" = "sha256-mGzfqYmo1PPcpKOlyA6ePzZA4lrNspOJ5G52meHiocY=";
-              # github.com/t8y2/mysql_async (rev 7b565fb)
-              "mysql_async-0.36.2" = "sha256-qxSo2JX/ldU8Z+PVDrHy8+EB9ZG3Vdo9TbKLCLQt2CU=";
-              # github.com/t8y2/rust_mysql_common (rev 5b30d49)
-              "mysql_common-0.35.5" = "sha256-CwXuC6QInSI1GcVSdaD1tcA7J+zTY9ZatOyTYTYPe0Q=";
-            };
-          };
-
-          # Build only the web backend crate; skip Tauri desktop crate
-          buildAndTestSubdir = "crates/dbx-web";
-
-          nativeBuildInputs = with pkgs; [
-            pkg-config
-            rustToolchain
-          ];
-
-          buildInputs =
-            with pkgs;
-            [
-              openssl
-              openssl.dev
-            ]
-            ++ linuxTauriDeps;
-
-          # Skip default features to avoid DuckDB compilation (slow)
-          buildFeatures = [ ];
-          cargoExtraArgs = "--no-default-features";
-
-          # Tests require a live database; skip in sandbox
-          doCheck = false;
-
-          meta = with pkgs.lib; {
-            description = "DBX web server backend";
-            license = licenses.asl20;
-            maintainers = [ ];
-            platforms = platforms.linux ++ platforms.darwin;
-          };
-        };
-
         # Convenience alias
         packages.default = self.packages.${system}.dbx-desktop;
 
