@@ -4071,6 +4071,10 @@ function treeItemMenuItems(): ContextMenuItem[] {
     } else {
       items.push({ label: t("contextMenu.clearDefaultDatabase"), action: clearNodeDefaultDatabase, icon: Database });
     }
+    if (node.type === "mongo-db") {
+      items.push({ label: "", separator: true });
+      items.push({ label: t("transfer.dataTransfer"), action: openTransfer, icon: ArrowRightLeft });
+    }
     if (node.type === "redis-db") {
       items.push({ label: "", separator: true });
       items.push({ label: t("redis.flushDb"), action: flushRedisDb, icon: Eraser, variant: "destructive" as const });
