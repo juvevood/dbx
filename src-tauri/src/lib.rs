@@ -844,6 +844,7 @@ pub fn run() {
             commands::query::build_truncate_table_sql,
             commands::query::build_drop_database_sql,
             commands::query::build_create_schema_sql,
+            commands::query::build_update_database_properties_sql,
             commands::query::build_drop_schema_sql,
             commands::query::build_duplicate_table_structure_sql,
             commands::query::build_copy_table_data_sql,

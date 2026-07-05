@@ -80,7 +80,23 @@ import { clearActiveTableReferencePayload, createTableReferencePayload, createTa
 import { usesSyntheticRowIdKey } from "@/lib/table/tableEditing";
 import { tableOpenPageLimit } from "@/lib/table/tableOpenPageLimit";
 import { getCachedTableMetadata, loadTableMetadata, TABLE_METADATA_CACHE_TTL_MS, tableMetadataToDataTabMeta } from "@/lib/metadata/tableMetadataCache";
-import { supportsDatabaseCreation, supportsDatabaseSearch, supportsFieldLineage, supportsObjectBrowserTreeNode, supportsSchemaDiagram, supportsSqlFileExecution, supportsTableImport, supportsTableTruncate, supportsTableStructureEditing, usesTreeSchemaMode } from "@/lib/database/databaseCapabilities";
+import {
+  canCreateConnectionNamespace,
+  canCreateDatabaseNodeNamespace,
+  canEditDatabaseProperties as canEditDatabasePropertiesForNode,
+  connectionNamespaceCreationTarget,
+  editableDatabasePropertyGroups,
+  supportsDatabaseCreation,
+  supportsDatabaseSearch,
+  supportsFieldLineage,
+  supportsObjectBrowserTreeNode,
+  supportsSchemaDiagram,
+  supportsSqlFileExecution,
+  supportsTableImport,
+  supportsTableTruncate,
+  supportsTableStructureEditing,
+  usesTreeSchemaMode,
+} from "@/lib/database/databaseCapabilities";
 import { copyNameForTreeNode, isDocumentBrowserTreeNode, objectSourceKindForTreeNode, shouldRunTreeNodeRowAction, treeNodeRowAction, treeNodeRowDoubleClickAction } from "@/lib/sidebar/treeNodeClick";
 import { isCopySidebarSelectionShortcut, isEditSidebarConnectionShortcut, isPasteSidebarSelectionShortcut } from "@/lib/editor/keyboardShortcuts";
 import { formatSqlInsert } from "@/lib/export/exportFormats";
@@ -93,13 +109,14 @@ import {
   buildDropDatabaseSql,
   buildDropObjectSql,
   buildDropSchemaSql,
+  buildGetDatabaseCommentSql,
   buildGetSchemaCommentSql,
+  buildUpdateDatabasePropertiesSql,
   buildDropTableSql,
   buildDropTableChildObjectSql,
   buildDuplicateTableStructureSql,
   buildCopyTableDataSql,
   buildEmptyTableSql,
-  buildSetSchemaCommentSql,
   buildTruncateTableSql,
   supportsSchemaComment,
   type DropTableChildObjectSqlOptions,
@@ -1753,6 +1770,12 @@ const showFlushRedisDbConfirm = ref(false);
 const showCreateSchemaDialog = ref(false);
 const createSchemaName = ref("");
 const showDropSchemaConfirm = ref(false);
+const showEditDatabasePropertiesDialog = ref(false);
+const editDatabasePropertiesLoading = ref(false);
+const editDatabasePropertiesPreviewSql = ref("");
+const editDatabaseCharset = ref("utf8mb4");
+const editDatabaseCollation = ref("utf8mb4_unicode_ci");
+const editDatabaseCommentText = ref("");
 const showEditSchemaCommentDialog = ref(false);
 const schemaCommentText = ref("");
 const schemaCommentLoading = ref(false);
@@ -2326,7 +2349,7 @@ const canCreateTable = computed(() => {
 
 const canCreateDatabase = computed(() => {
   const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
-  return props.node.type === "connection" && (supportsDatabaseCreation(config?.db_type) || config?.db_type === "duckdb" || (config?.db_type === "mongodb" && config.driver_profile !== "mongodb-legacy"));
+  return props.node.type === "connection" && canCreateConnectionNamespace(config);
 });
 
 const canCreateNacosNamespace = computed(() => {
@@ -2342,18 +2365,31 @@ const canEditNacosNamespace = computed(() => {
 
 const isDuckDbConnection = computed(() => {
   const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
-  return props.node.type === "connection" && config?.db_type === "duckdb";
+  return props.node.type === "connection" && connectionNamespaceCreationTarget(config) === "attach";
 });
 
 const canSetCreateDatabaseCharset = computed(() => {
   const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
-  return supportsCreateDatabaseCharset(config?.db_type, config?.driver_profile);
+  return connectionNamespaceCreationTarget(config) === "database" && supportsCreateDatabaseCharset(config?.db_type, config?.driver_profile);
 });
 
 const canDropDatabase = computed(() => {
   const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
   return props.node.type === "database" && !isSqlServerLinkedNode(props.node) && supportsDatabaseCreation(config?.db_type);
 });
+
+const databasePropertyGroups = computed(() => {
+  const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
+  return editableDatabasePropertyGroups(config, props.node);
+});
+
+const canEditDatabaseProperties = computed(() => {
+  const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
+  return canEditDatabasePropertiesForNode(config, props.node) && !isSqlServerLinkedNode(props.node);
+});
+
+const canEditDatabaseCharsetCollation = computed(() => databasePropertyGroups.value.includes("charsetCollation"));
+const canEditDatabaseComment = computed(() => databasePropertyGroups.value.includes("databaseComment"));
 
 const canDropMongoDatabase = computed(() => {
   const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
@@ -2393,7 +2429,7 @@ function mongoDropAllIndexesPreview(node: Pick<TreeNode, "label">): string {
 
 const canCreateSchema = computed(() => {
   const config = props.node.connectionId ? connectionStore.getConfig(props.node.connectionId) : undefined;
-  return props.node.type === "database" && usesTreeSchemaMode(effectiveDatabaseTypeForConnection(config)) && !connectionUsesDatabaseObjectTreeMode(config);
+  return canCreateDatabaseNodeNamespace(config, props.node) && !isSqlServerLinkedNode(props.node) && !connectionUsesDatabaseObjectTreeMode(config);
 });
 
 const canDropSchema = computed(() => {
@@ -2510,30 +2546,149 @@ async function refreshDropSchemaPreviewSql() {
   }).catch(() => "");
 }
 
-const schemaCommentPreviewSql = computed(() => {
-  if (!canEditSchemaComment.value) return "";
-  try {
-    return buildSetSchemaCommentSql({
-      databaseType: currentDatabaseType(),
-      name: props.node.schema || props.node.label,
-      comment: schemaCommentText.value,
-    });
-  } catch {
-    return "";
-  }
-});
+function databasePropertyName(): string {
+  return props.node.database || props.node.label;
+}
 
-function schemaCommentFromResult(result: { columns?: string[]; rows?: unknown[] }): string {
+function resultColumnValue(result: { columns?: string[]; rows?: unknown[] }, names: string[]): string {
   const firstRow = result.rows?.[0];
   if (Array.isArray(firstRow)) {
-    const index = Math.max(0, result.columns?.findIndex((column) => column === "comment") ?? 0);
+    const lowerNames = names.map((name) => name.toLowerCase());
+    const index = Math.max(0, result.columns?.findIndex((column) => lowerNames.includes(column.toLowerCase())) ?? 0);
     return firstRow[index] == null ? "" : String(firstRow[index]);
   }
-  if (firstRow && typeof firstRow === "object" && "comment" in firstRow) {
-    const value = (firstRow as { comment?: unknown }).comment;
+  if (firstRow && typeof firstRow === "object") {
+    const record = firstRow as Record<string, unknown>;
+    const key = Object.keys(record).find((column) => names.some((name) => name.toLowerCase() === column.toLowerCase()));
+    const value = key ? record[key] : undefined;
     return value == null ? "" : String(value);
   }
   return "";
+}
+
+function databasePropertyEditOptions() {
+  if (!canEditDatabaseProperties.value) return null;
+  const base = {
+    databaseType: currentDatabaseType(),
+    driverProfile: props.node.connectionId ? connectionStore.getConfig(props.node.connectionId)?.driver_profile : undefined,
+    target: "database" as const,
+    name: databasePropertyName(),
+  };
+  if (canEditDatabaseCharsetCollation.value) {
+    return {
+      ...base,
+      charset: editDatabaseCharset.value,
+      collation: editDatabaseCollation.value,
+    };
+  }
+  if (canEditDatabaseComment.value) {
+    return {
+      ...base,
+      comment: editDatabaseCommentText.value,
+    };
+  }
+  return null;
+}
+
+async function refreshEditDatabasePropertiesPreviewSql() {
+  editDatabasePropertiesPreviewSql.value = "";
+  const options = databasePropertyEditOptions();
+  if (!options) return;
+  editDatabasePropertiesPreviewSql.value = await buildUpdateDatabasePropertiesSql(options).catch(() => "");
+}
+
+async function loadDatabaseCharsetProperties() {
+  const node = props.node;
+  if (!node.connectionId) return;
+  const sql = `SELECT DEFAULT_CHARACTER_SET_NAME AS charset, DEFAULT_COLLATION_NAME AS collation FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '${databasePropertyName().replace(/'/g, "''")}';`;
+  const result = await api.executeQuery(node.connectionId, databasePropertyName(), sql, undefined, undefined, { maxRows: 1 });
+  const charset = resultColumnValue(result, ["charset", "DEFAULT_CHARACTER_SET_NAME"]);
+  const collation = resultColumnValue(result, ["collation", "DEFAULT_COLLATION_NAME"]);
+  if (charset) editDatabaseCharset.value = charset;
+  if (collation) editDatabaseCollation.value = collation;
+}
+
+async function loadDatabaseCommentProperty() {
+  const node = props.node;
+  if (!node.connectionId) return;
+  const sql = buildGetDatabaseCommentSql({
+    databaseType: currentDatabaseType(),
+    name: databasePropertyName(),
+  });
+  const result = await api.executeQuery(node.connectionId, databasePropertyName(), sql, undefined, undefined, { maxRows: 1 });
+  editDatabaseCommentText.value = resultColumnValue(result, ["comment"]);
+}
+
+async function openEditDatabasePropertiesDialog() {
+  const node = props.node;
+  if (!canEditDatabaseProperties.value || !node.connectionId) return;
+  editDatabasePropertiesLoading.value = true;
+  editDatabaseCharset.value = "utf8mb4";
+  editDatabaseCollation.value = "utf8mb4_unicode_ci";
+  editDatabaseCommentText.value = "";
+  editDatabasePropertiesPreviewSql.value = "";
+  createDatabaseCharsetOptions.value = fallbackCreateDatabaseCharset.charsets;
+  createDatabaseCollationsByCharset.value = fallbackCreateDatabaseCharset.collationsByCharset;
+  showEditDatabasePropertiesDialog.value = true;
+  try {
+    await connectionStore.ensureConnected(node.connectionId);
+    if (canEditDatabaseCharsetCollation.value) {
+      await loadCreateDatabaseCharsetMetadata("edit");
+      await loadDatabaseCharsetProperties().catch(() => undefined);
+    } else if (canEditDatabaseComment.value) {
+      await loadDatabaseCommentProperty().catch(() => undefined);
+    }
+    await refreshEditDatabasePropertiesPreviewSql();
+  } finally {
+    editDatabasePropertiesLoading.value = false;
+  }
+}
+
+async function confirmEditDatabaseProperties() {
+  const node = props.node;
+  if (!canEditDatabaseProperties.value || !node.connectionId || editDatabasePropertiesLoading.value) return;
+  editDatabasePropertiesLoading.value = true;
+  try {
+    await connectionStore.ensureConnected(node.connectionId);
+    const options = databasePropertyEditOptions();
+    if (!options) return;
+    const sql = await buildUpdateDatabasePropertiesSql(options);
+    await api.executeQuery(node.connectionId, databasePropertyName(), sql);
+    toast(t("contextMenu.editDatabasePropertiesSuccess", { name: node.label }), 3000);
+    showEditDatabasePropertiesDialog.value = false;
+    await connectionStore.loadDatabases(node.connectionId, { force: true });
+  } catch (e: any) {
+    toast(t("contextMenu.tableOperationFailed", { message: translateBackendError(t, e?.message || String(e)) }), 5000);
+  } finally {
+    editDatabasePropertiesLoading.value = false;
+  }
+}
+
+watch([editDatabaseCharset, editDatabaseCollation, editDatabaseCommentText], () => {
+  if (showEditDatabasePropertiesDialog.value) void refreshEditDatabasePropertiesPreviewSql();
+});
+
+const schemaCommentPreviewSql = ref("");
+
+async function refreshSchemaCommentPreviewSql() {
+  if (!canEditSchemaComment.value) {
+    schemaCommentPreviewSql.value = "";
+    return;
+  }
+  schemaCommentPreviewSql.value = await buildUpdateDatabasePropertiesSql({
+    databaseType: currentDatabaseType(),
+    target: "schema",
+    name: props.node.schema || props.node.label,
+    comment: schemaCommentText.value,
+  }).catch(() => "");
+}
+
+watch(schemaCommentText, () => {
+  if (showEditSchemaCommentDialog.value) void refreshSchemaCommentPreviewSql();
+});
+
+function schemaCommentFromResult(result: { columns?: string[]; rows?: unknown[] }): string {
+  return resultColumnValue(result, ["comment"]);
 }
 
 async function openEditSchemaCommentDialog() {
@@ -2550,8 +2705,10 @@ async function openEditSchemaCommentDialog() {
     });
     const result = await api.executeQuery(node.connectionId, node.database, sql, node.schema, undefined, { maxRows: 1 });
     schemaCommentText.value = schemaCommentFromResult(result);
+    await refreshSchemaCommentPreviewSql();
   } catch {
     schemaCommentText.value = "";
+    await refreshSchemaCommentPreviewSql();
   } finally {
     schemaCommentLoading.value = false;
   }
@@ -2563,8 +2720,9 @@ async function confirmEditSchemaComment() {
   schemaCommentLoading.value = true;
   try {
     await connectionStore.ensureConnected(node.connectionId);
-    const sql = buildSetSchemaCommentSql({
+    const sql = await buildUpdateDatabasePropertiesSql({
       databaseType: currentDatabaseType(),
+      target: "schema",
       name: node.schema || node.label,
       comment: schemaCommentText.value,
     });
@@ -2594,7 +2752,9 @@ function openCreateDatabaseDialog() {
   createDatabaseCharsetOptions.value = fallbackCreateDatabaseCharset.charsets;
   createDatabaseCollationsByCharset.value = fallbackCreateDatabaseCharset.collationsByCharset;
   showCreateDatabaseDialog.value = true;
-  void loadCreateDatabaseCharsetMetadata();
+  if (canSetCreateDatabaseCharset.value) {
+    void loadCreateDatabaseCharsetMetadata();
+  }
 }
 
 function updateCreateDatabaseCharset(value: string) {
@@ -2603,21 +2763,33 @@ function updateCreateDatabaseCharset(value: string) {
   createDatabaseCollation.value = nextCreateDatabaseCollation(value, previousCharset, createDatabaseCollation.value, createDatabaseCollationsByCharset.value);
 }
 
-async function loadCreateDatabaseCharsetMetadata() {
+function updateEditDatabaseCharset(value: string) {
+  const previousCharset = editDatabaseCharset.value;
+  editDatabaseCharset.value = value;
+  editDatabaseCollation.value = nextCreateDatabaseCollation(value, previousCharset, editDatabaseCollation.value, createDatabaseCollationsByCharset.value);
+}
+
+async function loadCreateDatabaseCharsetMetadata(target: "create" | "edit" = "create") {
   const node = props.node;
   if (!node.connectionId || createDatabaseCharsetLoading.value) return;
   createDatabaseCharsetLoading.value = true;
   try {
     await connectionStore.ensureConnected(node.connectionId);
     const [charsetResult, collationResult] = await Promise.all([api.executeQuery(node.connectionId, "", "SHOW CHARACTER SET", undefined, undefined, { maxRows: 1000 }), api.executeQuery(node.connectionId, "", "SHOW COLLATION", undefined, undefined, { maxRows: 10000 })]);
-    if (!showCreateDatabaseDialog.value) return;
+    if (target === "create" && !showCreateDatabaseDialog.value) return;
+    if (target === "edit" && !showEditDatabasePropertiesDialog.value) return;
     const metadata = parseCreateDatabaseCharsetMetadata(charsetResult, collationResult);
     createDatabaseCharsetOptions.value = metadata.charsets;
     createDatabaseCollationsByCharset.value = metadata.collationsByCharset;
-    if (!createDatabaseCharsetOptions.value.includes(createDatabaseCharset.value) && createDatabaseCharsetOptions.value.length) {
-      updateCreateDatabaseCharset(createDatabaseCharsetOptions.value[0]);
+    const selectedCharset = target === "create" ? createDatabaseCharset.value : editDatabaseCharset.value;
+    if (!createDatabaseCharsetOptions.value.includes(selectedCharset) && createDatabaseCharsetOptions.value.length) {
+      target === "create" ? updateCreateDatabaseCharset(createDatabaseCharsetOptions.value[0]) : updateEditDatabaseCharset(createDatabaseCharsetOptions.value[0]);
     } else {
-      createDatabaseCollation.value = nextCreateDatabaseCollation(createDatabaseCharset.value, createDatabaseCharset.value, createDatabaseCollation.value, createDatabaseCollationsByCharset.value);
+      if (target === "create") {
+        createDatabaseCollation.value = nextCreateDatabaseCollation(createDatabaseCharset.value, createDatabaseCharset.value, createDatabaseCollation.value, createDatabaseCollationsByCharset.value);
+      } else {
+        editDatabaseCollation.value = nextCreateDatabaseCollation(editDatabaseCharset.value, editDatabaseCharset.value, editDatabaseCollation.value, createDatabaseCollationsByCharset.value);
+      }
     }
   } catch {
     createDatabaseCharsetOptions.value = fallbackCreateDatabaseCharset.charsets;
@@ -2745,6 +2917,7 @@ async function confirmCreateDatabase() {
     const sql = await buildCreateDatabaseSql({
       databaseType: config?.db_type,
       driverProfile: config?.driver_profile,
+      target: "database",
       name,
       charset: createDatabaseCharset.value,
       collation: createDatabaseCollation.value,
@@ -4315,6 +4488,9 @@ function treeItemMenuItems(): ContextMenuItem[] {
         items.push({ label: t("contextMenu.clearDefaultDatabase"), action: clearNodeDefaultDatabase, icon: Database });
       }
     }
+    if (canEditDatabaseProperties.value) {
+      items.push({ label: t("contextMenu.editDatabaseProperties"), action: openEditDatabasePropertiesDialog, icon: SquarePen });
+    }
     if (canCreateTable.value) {
       items.push({ label: t("contextMenu.createTable"), action: createTable, icon: Plus });
     }
@@ -5108,6 +5284,79 @@ function treeItemMenuItems(): ContextMenuItem[] {
       <DialogFooter>
         <Button variant="outline" @click="showCreateDatabaseDialog = false">{{ t("dangerDialog.cancel") }}</Button>
         <Button :disabled="!createDatabaseName.trim()" @click="confirmCreateDatabase">{{ t("dangerDialog.confirm") }}</Button>
+      </DialogFooter>
+    </DialogContent>
+  </Dialog>
+
+  <Dialog v-model:open="showEditDatabasePropertiesDialog">
+    <DialogContent class="sm:max-w-[460px]">
+      <DialogHeader>
+        <DialogTitle>{{ t("contextMenu.editDatabasePropertiesTitle", { name: node.label }) }}</DialogTitle>
+      </DialogHeader>
+      <div class="grid gap-3">
+        <div v-if="canEditDatabaseCharsetCollation" class="grid gap-3">
+          <div class="grid gap-1.5">
+            <label class="text-xs font-medium text-muted-foreground">{{ t("contextMenu.createDatabaseCharset") }}</label>
+            <SearchableSelect
+              :model-value="editDatabaseCharset"
+              :options="createDatabaseCharsetOptions"
+              :placeholder="t('contextMenu.createDatabaseCharsetPlaceholder')"
+              :search-placeholder="t('contextMenu.createDatabaseCharsetSearchPlaceholder')"
+              :empty-text="t('contextMenu.createDatabaseCharsetEmpty')"
+              :loading-text="t('contextMenu.createDatabaseCharsetLoading')"
+              :loading="createDatabaseCharsetLoading"
+              :normalize-custom="normalizeCreateDatabaseCharset"
+              allow-custom
+              trigger-variant="outline"
+              trigger-class="h-9 w-full max-w-none justify-between border bg-background px-3 text-sm shadow-xs hover:bg-accent"
+              content-class="w-[var(--reka-popover-trigger-width)]"
+              @update:model-value="updateEditDatabaseCharset"
+            >
+              <template #custom-option-label="{ value }">
+                <span class="truncate">{{ t("contextMenu.createDatabaseCharsetCustomOption", { value }) }}</span>
+              </template>
+            </SearchableSelect>
+          </div>
+          <div class="grid gap-1.5">
+            <label class="text-xs font-medium text-muted-foreground">{{ t("contextMenu.createDatabaseCollation") }}</label>
+            <SearchableSelect
+              v-model="editDatabaseCollation"
+              :options="createDatabaseCollationOptionsForCharset(editDatabaseCharset, createDatabaseCollationsByCharset)"
+              :placeholder="t('contextMenu.createDatabaseCollationPlaceholder')"
+              :search-placeholder="t('contextMenu.createDatabaseCollationSearchPlaceholder')"
+              :empty-text="t('contextMenu.createDatabaseCollationEmpty')"
+              :loading-text="t('contextMenu.createDatabaseCollationLoading')"
+              :loading="createDatabaseCharsetLoading"
+              :normalize-custom="normalizeCreateDatabaseCharset"
+              allow-custom
+              trigger-variant="outline"
+              trigger-class="h-9 w-full max-w-none justify-between border bg-background px-3 text-sm shadow-xs hover:bg-accent"
+              content-class="w-[var(--reka-popover-trigger-width)]"
+            >
+              <template #custom-option-label="{ value }">
+                <span class="truncate">{{ t("contextMenu.createDatabaseCollationCustomOption", { value }) }}</span>
+              </template>
+            </SearchableSelect>
+          </div>
+        </div>
+        <div v-if="canEditDatabaseComment" class="grid gap-1.5">
+          <label class="text-xs font-medium text-muted-foreground">{{ t("contextMenu.editDatabaseComment") }}</label>
+          <textarea
+            v-model="editDatabaseCommentText"
+            class="min-h-28 w-full resize-y rounded-md border border-input bg-background px-3 py-2 text-sm outline-none transition-colors focus:border-ring focus:ring-1 focus:ring-ring/40"
+            :placeholder="t('contextMenu.editDatabaseCommentPlaceholder')"
+            :disabled="editDatabasePropertiesLoading"
+            @keydown.meta.enter.prevent="confirmEditDatabaseProperties"
+            @keydown.ctrl.enter.prevent="confirmEditDatabaseProperties"
+          ></textarea>
+        </div>
+        <pre v-if="editDatabasePropertiesPreviewSql" class="max-h-32 overflow-auto rounded bg-muted p-3 text-xs whitespace-pre-wrap" v-html="highlight(editDatabasePropertiesPreviewSql)"></pre>
+      </div>
+      <DialogFooter>
+        <Button variant="outline" :disabled="editDatabasePropertiesLoading" @click="showEditDatabasePropertiesDialog = false">{{ t("dangerDialog.cancel") }}</Button>
+        <Button :disabled="editDatabasePropertiesLoading" @click="confirmEditDatabaseProperties">
+          {{ editDatabasePropertiesLoading ? t("contextMenu.editDatabasePropertiesSaving") : t("dangerDialog.confirm") }}
+        </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

@@ -332,6 +332,7 @@ async fn main() {
         .route("/query/build-truncate-table-sql", post(routes::query::build_truncate_table_sql))
         .route("/query/build-drop-database-sql", post(routes::query::build_drop_database_sql))
         .route("/query/build-create-schema-sql", post(routes::query::build_create_schema_sql))
+        .route("/query/build-update-database-properties-sql", post(routes::query::build_update_database_properties_sql))
         .route("/query/build-drop-schema-sql", post(routes::query::build_drop_schema_sql))
         .route("/query/build-duplicate-table-structure-sql", post(routes::query::build_duplicate_table_structure_sql))
         .route("/query/build-copy-table-data-sql", post(routes::query::build_copy_table_data_sql))

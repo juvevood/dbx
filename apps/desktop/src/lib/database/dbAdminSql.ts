@@ -38,6 +38,16 @@ export interface SchemaCommentSqlOptions extends SchemaNameSqlOptions {
   comment: string;
 }
 
+export interface DatabasePropertyEditSqlOptions {
+  databaseType?: DatabaseType;
+  driverProfile?: string | null;
+  target: "database" | "schema";
+  name: string;
+  charset?: string;
+  collation?: string;
+  comment?: string;
+}
+
 export interface DuplicateTableStructureSqlOptions {
   databaseType?: DatabaseType;
   schema?: string | null;
@@ -88,7 +98,18 @@ export function buildDropSchemaSql(options: SchemaNameSqlOptions): Promise<strin
 }
 
 export function supportsSchemaComment(databaseType?: DatabaseType): boolean {
-  return databaseType === "postgres";
+  return ["postgres", "gaussdb", "kwdb", "kingbase", "highgo", "vastbase", "opengauss", "yashandb"].includes(databaseType || "");
+}
+
+export function buildUpdateDatabasePropertiesSql(options: DatabasePropertyEditSqlOptions): Promise<string> {
+  return api.buildUpdateDatabasePropertiesSql(options);
+}
+
+export function buildGetDatabaseCommentSql(options: DatabaseNameSqlOptions): string {
+  if (!supportsSchemaComment(options.databaseType)) {
+    throw new Error("Database comments are not supported by this database");
+  }
+  return ["SELECT pg_catalog.shobj_description(db.oid, 'pg_database') AS comment", "FROM pg_catalog.pg_database db", `WHERE db.datname = ${quoteSqlLiteral(options.name)};`].join("\n");
 }
 
 export function buildGetSchemaCommentSql(options: SchemaNameSqlOptions): string {

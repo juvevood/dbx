@@ -171,6 +171,7 @@ export const buildEmptyTableSql = forward("buildEmptyTableSql");
 export const buildTruncateTableSql = forward("buildTruncateTableSql");
 export const buildDropDatabaseSql = forward("buildDropDatabaseSql");
 export const buildCreateSchemaSql = forward("buildCreateSchemaSql");
+export const buildUpdateDatabasePropertiesSql = forward("buildUpdateDatabasePropertiesSql");
 export const buildDropSchemaSql = forward("buildDropSchemaSql");
 export const buildDuplicateTableStructureSql = forward("buildDuplicateTableStructureSql");
 export const buildCopyTableDataSql = forward("buildCopyTableDataSql");
