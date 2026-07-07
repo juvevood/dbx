@@ -143,10 +143,11 @@ fn build_app_menu<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) -> tauri:
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn linux_has_nvidia_gpu() -> bool {
-    // Detect an NVIDIA GPU by checking for the NVIDIA kernel device node.
-    // This is more reliable than parsing lspci output and has no external deps.
-    std::path::Path::new("/dev/nvidiactl").exists()
-        || std::path::Path::new("/proc/driver/nvidia/version").exists()
+    // Detect the proprietary NVIDIA driver by checking for its kernel device
+    // node / proc entry. This is more reliable than parsing lspci output and
+    // has no external deps. Nouveau (open-source) does not create these nodes
+    // and falls through to the Mesa / DMABuf path, which is the desired behavior.
+    std::path::Path::new("/dev/nvidiactl").exists() || std::path::Path::new("/proc/driver/nvidia/version").exists()
 }
 
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
@@ -155,10 +156,7 @@ fn linux_webkit_rendering_workarounds(has_nvidia: bool) -> &'static [(&'static s
         // NVIDIA + Wayland: the DMABuf renderer triggers blank-window / Wayland
         // protocol errors (EGL_EXT_image_dma_buf_import mismatch). Disable it
         // and suppress explicit-sync to avoid a compositor crash.
-        &[
-            ("WEBKIT_DISABLE_DMABUF_RENDERER", "1"),
-            ("__NV_DISABLE_EXPLICIT_SYNC", "1"),
-        ]
+        &[("WEBKIT_DISABLE_DMABUF_RENDERER", "1"), ("__NV_DISABLE_EXPLICIT_SYNC", "1")]
     } else {
         // AMD / Intel / other Mesa drivers support DMABuf natively.
         // Keeping DMABUF enabled lets WebKitGTK use GPU compositing, which
@@ -429,9 +427,8 @@ pub(crate) fn apply_desktop_settings(app: &tauri::AppHandle, desktop_settings: &
 mod tests {
     use super::{
         linux_appimage_system_gtk_immodules_cache, linux_appimage_wayland_backend_override,
-        linux_has_nvidia_gpu, linux_webkit_rendering_workarounds, native_window_decorations_override,
-        should_confirm_app_exit_request, should_hide_window_on_close, should_setup_desktop_tray,
-        should_show_main_window_after_setup,
+        linux_webkit_rendering_workarounds, native_window_decorations_override, should_confirm_app_exit_request,
+        should_hide_window_on_close, should_setup_desktop_tray, should_show_main_window_after_setup,
     };
     use std::ffi::OsStr;
 
@@ -487,15 +484,6 @@ mod tests {
         );
         // AMD / Intel / Mesa: DMABuf is supported — no workarounds needed.
         assert_eq!(linux_webkit_rendering_workarounds(false), &[]);
-    }
-
-    #[test]
-    fn detects_nvidia_gpu_via_device_node() {
-        // The test environment does not have /dev/nvidiactl, so this must return false.
-        // On a real NVIDIA machine either file would exist and return true.
-        let has_nvidia = linux_has_nvidia_gpu();
-        // We can only assert the return type is bool; actual value depends on hardware.
-        let _ = has_nvidia;
     }
 
     #[test]
