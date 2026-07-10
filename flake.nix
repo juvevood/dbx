@@ -43,6 +43,7 @@
             webkitgtk_4_1
             gtk3
             libappindicator-gtk3
+            libayatana-appindicator   # provides libayatana-appindicator3.so.1 (dlopen'd at runtime)
             librsvg
             patchelf
             openssl
@@ -205,6 +206,7 @@
               pkgs.rustPlatform.cargoSetupHook # sets CARGO_HOME to cargoDeps
               pkgs.pnpmConfigHook             # sets up pnpm offline store
               pkgs.desktop-file-utils         # for `desktop-file-validate`
+              pkgs.copyDesktopItems           # installs desktopItem into share/applications
             ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux (
               with pkgs;
@@ -272,6 +274,21 @@
           # Tauri reads the version from this env var during build
           TAURI_SKIP_DEVSERVER_CHECK = "true";
 
+          # ── Runtime library path injection ───────────────────────────────── #
+          # libappindicator-sys uses dlopen() at runtime to load the appindicator
+          # shared library. dlopen() does NOT honour the binary's RPATH — it only
+          # searches LD_LIBRARY_PATH and system paths. In a Nix derivation the
+          # library lives in the store, not in /usr/lib, so we must inject the
+          # path explicitly into the wrapGAppsHook3 C-wrapper.
+          #
+          # IMPORTANT: wrapGAppsHook3 uses its own `gappsWrapperArgs` bash array
+          # (NOT `makeWrapperArgs`) — inject via preFixup before the hook runs.
+          preFixup = pkgs.lib.optionalString pkgs.stdenv.isLinux ''
+            gappsWrapperArgs+=(
+              --prefix LD_LIBRARY_PATH : "${pkgs.lib.makeLibraryPath linuxTauriDeps}"
+            )
+          '';
+
           # ── Build phases ─────────────────────────────────────────────────── #
           preConfigure = ''
             export HOME=$TMPDIR
@@ -312,9 +329,10 @@
             # tauri build --no-bundle puts the binary at target/release/dbx
             cp target/release/dbx $out/bin/dbx
 
-            # Copy desktop integration files if present.
-            # Install every PNG size Tauri ships so the hicolor theme lookup
-            # (e.g. panels @ 48px, launchers @ 128px) always succeeds.
+            # Install icon files into the hicolor theme tree so that all
+            # desktop environments (GNOME Shell, KDE Plasma, XFCE, etc.) can
+            # find the right size: task-switcher (32px), panel (48px),
+            # launcher (64px), app-menu (128px), HiDPI launcher (256px).
             if [ -d src-tauri/icons ]; then
               for size in 32 128; do
                 if [ -f "src-tauri/icons/''${size}x''${size}.png" ]; then
@@ -323,11 +341,36 @@
                     "$out/share/icons/hicolor/''${size}x''${size}/apps/dbx.png"
                 fi
               done
-              # @2x retina variant for 128px
+
+              # @2x retina variant (128x128@2x) → install as 256x256
               if [ -f "src-tauri/icons/128x128@2x.png" ]; then
                 mkdir -p "$out/share/icons/hicolor/256x256/apps"
                 cp "src-tauri/icons/128x128@2x.png" \
                   "$out/share/icons/hicolor/256x256/apps/dbx.png"
+              fi
+
+              # Synthesise the missing common sizes (48 / 64) from the 128px source
+              # so panel, task-switcher and launcher lookups always succeed.
+              for size in 16 48 64; do
+                mkdir -p "$out/share/icons/hicolor/''${size}x''${size}/apps"
+                # Use the 32px source for 16px (closer in size → better quality),
+                # and 128px source for 48 / 64px.
+                if [ "$size" -le 32 ] && [ -f "src-tauri/icons/32x32.png" ]; then
+                  src="src-tauri/icons/32x32.png"
+                elif [ -f "src-tauri/icons/128x128.png" ]; then
+                  src="src-tauri/icons/128x128.png"
+                else
+                  continue
+                fi
+                cp "$src" "$out/share/icons/hicolor/''${size}x''${size}/apps/dbx.png"
+              done
+
+              # Install the full-size icon.png as the scalable fallback so that
+              # Tauri's default_window_icon() and the taskbar always have an image.
+              if [ -f "src-tauri/icons/icon.png" ]; then
+                mkdir -p "$out/share/icons/hicolor/512x512/apps"
+                cp "src-tauri/icons/icon.png" \
+                  "$out/share/icons/hicolor/512x512/apps/dbx.png"
               fi
             fi
 

@@ -70,7 +70,7 @@ fn should_hide_window_on_close(target_os: &str) -> bool {
 }
 
 fn should_setup_desktop_tray(target_os: &str, show_tray_icon: bool) -> bool {
-    show_tray_icon && matches!(target_os, "macos" | "windows")
+    show_tray_icon && matches!(target_os, "macos" | "windows" | "linux")
 }
 
 #[cfg(test)]
@@ -449,7 +449,15 @@ fn apply_desktop_tray_icon_theme(app: &tauri::AppHandle, _icon_theme: DesktopIco
             };
             _tray.set_icon(icon)?;
         }
-        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        #[cfg(target_os = "linux")]
+        {
+            let icon = match _icon_theme {
+                DesktopIconTheme::Default => app.default_window_icon().cloned(),
+                DesktopIconTheme::Black => Some(BLACK_APP_ICON),
+            };
+            _tray.set_icon(icon)?;
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
             let _ = (_tray, _icon_theme);
         }
@@ -460,7 +468,7 @@ fn apply_desktop_tray_icon_theme(app: &tauri::AppHandle, _icon_theme: DesktopIco
 pub(crate) fn apply_desktop_settings(app: &tauri::AppHandle, desktop_settings: &DesktopSettings) -> tauri::Result<()> {
     apply_debug_log_level(desktop_settings.debug_logging_enabled);
     apply_desktop_icon_theme(app, desktop_settings.icon_theme)?;
-    if matches!(std::env::consts::OS, "macos" | "windows") {
+    if matches!(std::env::consts::OS, "macos" | "windows" | "linux") {
         if let Some(tray) = app.tray_by_id(DESKTOP_TRAY_ID) {
             tray.set_visible(desktop_settings.show_tray_icon)?;
             apply_desktop_tray_icon_theme(app, desktop_settings.icon_theme)?;
@@ -496,12 +504,13 @@ mod tests {
     }
 
     #[test]
-    fn sets_up_desktop_tray_for_windows_and_macos() {
+    fn sets_up_desktop_tray_for_windows_macos_and_linux() {
         assert!(should_setup_desktop_tray("windows", true));
         assert!(should_setup_desktop_tray("macos", true));
+        assert!(should_setup_desktop_tray("linux", true));
         assert!(!should_setup_desktop_tray("windows", false));
         assert!(!should_setup_desktop_tray("macos", false));
-        assert!(!should_setup_desktop_tray("linux", true));
+        assert!(!should_setup_desktop_tray("linux", false));
     }
 
     #[cfg(target_os = "macos")]
