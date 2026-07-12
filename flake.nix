@@ -207,6 +207,7 @@
               pkgs.pnpmConfigHook             # sets up pnpm offline store
               pkgs.desktop-file-utils         # for `desktop-file-validate`
               pkgs.copyDesktopItems           # installs desktopItem into share/applications
+              pkgs.imagemagick                # generates correctly sized hicolor icons
             ]
             ++ pkgs.lib.optionals pkgs.stdenv.isLinux (
               with pkgs;
@@ -349,12 +350,10 @@
                   "$out/share/icons/hicolor/256x256/apps/dbx.png"
               fi
 
-              # Synthesise the missing common sizes (48 / 64) from the 128px source
-              # so panel, task-switcher and launcher lookups always succeed.
+              # Generate missing common sizes so hicolor directory metadata
+              # always matches the actual PNG dimensions.
               for size in 16 48 64; do
                 mkdir -p "$out/share/icons/hicolor/''${size}x''${size}/apps"
-                # Use the 32px source for 16px (closer in size → better quality),
-                # and 128px source for 48 / 64px.
                 if [ "$size" -le 32 ] && [ -f "src-tauri/icons/32x32.png" ]; then
                   src="src-tauri/icons/32x32.png"
                 elif [ -f "src-tauri/icons/128x128.png" ]; then
@@ -362,7 +361,8 @@
                 else
                   continue
                 fi
-                cp "$src" "$out/share/icons/hicolor/''${size}x''${size}/apps/dbx.png"
+                magick "$src" -resize "''${size}x''${size}" \
+                  "$out/share/icons/hicolor/''${size}x''${size}/apps/dbx.png"
               done
 
               # Install the full-size icon.png as the scalable fallback so that
