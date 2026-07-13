@@ -227,18 +227,22 @@ function scheduleLabelOverflowMeasure() {
   });
 }
 
-function observeLabelOverflow() {
-  labelResizeObserver?.disconnect();
-  labelResizeObserver = null;
+function handleMouseEnter() {
   if (!shouldMeasureLabelOverflow()) {
     labelOverflowing.value = false;
     return;
   }
-  if (typeof ResizeObserver !== "undefined" && labelRef.value) {
+  updateLabelOverflow();
+  if (typeof ResizeObserver !== "undefined" && labelRef.value && !labelResizeObserver) {
     labelResizeObserver = new ResizeObserver(scheduleLabelOverflowMeasure);
     labelResizeObserver.observe(labelRef.value);
   }
-  scheduleLabelOverflowMeasure();
+}
+
+function handleMouseLeave() {
+  labelResizeObserver?.disconnect();
+  labelResizeObserver = null;
+  cancelLabelOverflowMeasure();
 }
 const connectionStore = useConnectionStore();
 const queryStore = useQueryStore();
@@ -992,12 +996,6 @@ function requestPasteTreeClipboard(): boolean {
   return true;
 }
 
-function onSidebarRequestPasteTable(event: Event) {
-  const nodeId = (event as CustomEvent<{ nodeId?: string }>).detail?.nodeId;
-  if (nodeId !== props.node.id) return;
-  requestPasteTreeClipboard();
-}
-
 function requestRefreshSelectedNode(): boolean {
   if (!canRefreshTreeNodeShortcut()) return false;
   void refresh();
@@ -1298,6 +1296,12 @@ async function openData() {
   );
   queryStore.setExecutingWithId(tabId, openDataId);
   logPhase("state-prepared", { tabId });
+
+  // Yield to Vue's scheduler so the new tab becomes visible in the UI (tab
+  // bar activates, content area switches) before the first blocking network
+  // call. Without this the entire openData flow runs synchronously before the
+  // browser paints, making the UI feel frozen on each table click.
+  await nextTick();
 
   // Helper to check if this openData call is still active (not superseded by a newer click)
   const isActive = () => queryStore.tabs.find((t) => t.id === tabId)?.executionId === openDataId;
@@ -4180,7 +4184,7 @@ const isConnected = computed(() => props.node.type === "connection" && !!props.n
 const isConnecting = computed(() => props.node.type === "connection" && !!props.node.connectionId && connectionStore.connectingIds.has(props.node.connectionId));
 const isConnectionReadonly = computed(() => props.node.type === "connection" && !!props.node.connectionId && (connectionStore.getConfig(props.node.connectionId)?.read_only ?? false));
 const isOpenedDatabase = computed(() => isSidebarDatabaseOpened(props.node, connectionStore.isTreeNodeChildrenLoaded));
-const showsDatabaseOpenIndicator = computed(() => props.node.type === "database" && (isOpenedDatabase.value || (!!props.node.connectionId && props.node.database != null && queryStore.isDatabaseOpen(props.node.connectionId, props.node.database))));
+const showsDatabaseOpenIndicator = computed(() => props.node.type === "database" && (isOpenedDatabase.value || (!!props.node.connectionId && props.node.database != null && queryStore.openDatabaseKeys.has(`${props.node.connectionId}\x00${props.node.database}`))));
 const canCloseDatabaseConnection = computed(() => canCloseSidebarDatabaseConnection(props.node, connectionStore.isTreeNodeChildrenLoaded));
 const nodeIconClass = computed(() => {
   const infoClass = getIconInfo(props.node)?.colorClass;
@@ -4222,7 +4226,7 @@ const connectionColor = computed(() => {
 });
 const isActiveConnectionScope = computed(() => !!props.node.connectionId && connectionStore.activeConnectionId === props.node.connectionId);
 const isSelected = computed(() => connectionStore.selectedTreeNodeId === props.node.id);
-const isMultiSelected = computed(() => connectionStore.selectedTreeNodeIds.includes(props.node.id));
+const isMultiSelected = computed(() => connectionStore.selectedTreeNodeIdsSet.has(props.node.id));
 const isTreeRowSelected = computed(() => isSelected.value || isMultiSelected.value);
 const usesSelectionSetHighlight = computed(() => connectionStore.connectionMultiSelectActive || connectionStore.selectedTreeNodeIds.length > 1);
 const rowStyle = computed(() => {
@@ -4305,14 +4309,6 @@ watch(
     }
   },
   { immediate: true },
-);
-
-watch(
-  [() => props.node.id, () => visibleLabel(props.node), () => usesFullWidthLabel.value, () => detailTooltip.value?.rows.length ?? 0, isRenamingGroup],
-  () => {
-    nextTick(observeLabelOverflow);
-  },
-  { flush: "post", immediate: true },
 );
 
 function finishRenameGroup() {
@@ -4546,19 +4542,18 @@ function onRowMouseDown(event: MouseEvent) {
 }
 
 onMounted(() => {
-  observeLabelOverflow();
-  window.addEventListener("dbx:sidebar-request-paste-table", onSidebarRequestPasteTable);
+  if (sidebarTreeContext?.registerPasteHandler) {
+    sidebarTreeContext.registerPasteHandler(props.node.id, requestPasteTreeClipboard);
+  }
 });
 
 onBeforeUnmount(() => {
-  labelResizeObserver?.disconnect();
-  labelResizeObserver = null;
-  cancelLabelOverflowMeasure();
-  window.removeEventListener("dbx:sidebar-request-paste-table", onSidebarRequestPasteTable);
+  handleMouseLeave();
+  if (sidebarTreeContext?.unregisterPasteHandler) {
+    sidebarTreeContext.unregisterPasteHandler(props.node.id);
+  }
   finishTableReferenceDrag();
 });
-
-// ---- CustomContextMenu ----
 
 const shortcutCopyName = computed(() => settingsStore.editorSettings.shortcuts.copySidebarSelection);
 const shortcutEditConnection = computed(() => settingsStore.editorSettings.shortcuts.editSidebarConnection);

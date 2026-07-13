@@ -520,6 +520,8 @@ function onSidebarScrollbarThumbPointerDown(event: PointerEvent) {
   window.addEventListener("pointercancel", stopSidebarScrollbarDrag);
 }
 
+const pasteHandlers = new Map<string, () => void>();
+
 provide(sidebarTreeContextKey, {
   getVisibleNodes: () => selectableVisibleNodes.value,
   getVisibleNodeIndex: (id: string) => selectableVisibleNodeIndexById.value.get(id) ?? -1,
@@ -527,6 +529,12 @@ provide(sidebarTreeContextKey, {
     latestTableSearchInteractionParentId = parentNodeId;
     store.setSidebarTableSearchQuery(parentNodeId, query);
     scheduleSidebarTableSearchRefresh(parentNodeId, { restoreFocus: true });
+  },
+  registerPasteHandler: (nodeId, callback) => {
+    pasteHandlers.set(nodeId, callback);
+  },
+  unregisterPasteHandler: (nodeId) => {
+    pasteHandlers.delete(nodeId);
   },
 });
 
@@ -1032,8 +1040,13 @@ function requestSelectedSidebarPaste(): boolean {
     return true;
   }
   if (clipboard?.kind !== "table-copy" || clipboard.tables.length === 0 || !selectedNodeId) return false;
-  window.dispatchEvent(new CustomEvent("dbx:sidebar-request-paste-table", { detail: { nodeId: selectedNodeId } }));
-  return true;
+
+  const handler = pasteHandlers.get(selectedNodeId);
+  if (handler) {
+    handler();
+    return true;
+  }
+  return false;
 }
 
 onMounted(() => {
