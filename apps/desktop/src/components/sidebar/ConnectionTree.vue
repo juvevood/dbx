@@ -19,6 +19,7 @@ import { activeTabSidebarTarget, findSidebarNodeForActiveTab, findSidebarNodeFor
 import { findLoadedTableTargetForCandidate, queryContextTargetFromCandidate, queryCursorTableCandidate, type QueryCursorTableCandidate } from "@/lib/sql/queryCursorTableTarget";
 import { SIDEBAR_TREE_ROW_HEIGHT, SIDEBAR_TREE_PRERENDER_COUNT, SIDEBAR_TREE_SCROLL_BUFFER, flattenTree, shouldVirtualizeFlatTree, type FlatTreeNode } from "@/composables/useFlatTree";
 import { sidebarTreeContextKey } from "@/lib/sidebar/sidebarTreeContext";
+import { createSidebarPasteHandlerRegistry } from "@/lib/sidebar/sidebarPasteHandlerRegistry";
 import { insertSidebarTableSearchControls, isSidebarTableSearchControlNode } from "@/lib/sidebar/sidebarTableSearchControl";
 import TreeItem from "./TreeItem.vue";
 import { RecycleScroller } from "vue-virtual-scroller";
@@ -520,7 +521,7 @@ function onSidebarScrollbarThumbPointerDown(event: PointerEvent) {
   window.addEventListener("pointercancel", stopSidebarScrollbarDrag);
 }
 
-const pasteHandlers = new Map<string, () => void>();
+const pasteHandlerRegistry = createSidebarPasteHandlerRegistry();
 
 provide(sidebarTreeContextKey, {
   getVisibleNodes: () => selectableVisibleNodes.value,
@@ -530,12 +531,7 @@ provide(sidebarTreeContextKey, {
     store.setSidebarTableSearchQuery(parentNodeId, query);
     scheduleSidebarTableSearchRefresh(parentNodeId, { restoreFocus: true });
   },
-  registerPasteHandler: (nodeId, callback) => {
-    pasteHandlers.set(nodeId, callback);
-  },
-  unregisterPasteHandler: (nodeId) => {
-    pasteHandlers.delete(nodeId);
-  },
+  registerPasteHandler: pasteHandlerRegistry.register,
 });
 
 const pendingRenameGroupId = ref<string | null>(null);
@@ -1041,12 +1037,7 @@ function requestSelectedSidebarPaste(): boolean {
   }
   if (clipboard?.kind !== "table-copy" || clipboard.tables.length === 0 || !selectedNodeId) return false;
 
-  const handler = pasteHandlers.get(selectedNodeId);
-  if (handler) {
-    handler();
-    return true;
-  }
-  return false;
+  return pasteHandlerRegistry.request(selectedNodeId);
 }
 
 onMounted(() => {

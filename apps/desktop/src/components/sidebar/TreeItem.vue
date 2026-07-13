@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, nextTick, watch, onMounted, onBeforeUnmount, inject, type Component } from "vue";
+import { ref, computed, nextTick, watch, onBeforeUnmount, inject, type Component } from "vue";
 import { useSqlHighlighter } from "@/composables/useSqlHighlighter";
 import { useI18n } from "vue-i18n";
 import { translateBackendError } from "@/i18n/backend-errors";
@@ -4541,17 +4541,20 @@ function onRowMouseDown(event: MouseEvent) {
   }
 }
 
-onMounted(() => {
-  if (sidebarTreeContext?.registerPasteHandler) {
-    sidebarTreeContext.registerPasteHandler(props.node.id, requestPasteTreeClipboard);
-  }
-});
+// RecycleScroller reuses mounted TreeItem instances for different nodes, so the
+// handler must follow the reactive node id rather than component mount lifetime.
+const stopPasteHandlerRegistration = watch(
+  () => props.node.id,
+  (nodeId, _previousNodeId, onCleanup) => {
+    const unregister = sidebarTreeContext?.registerPasteHandler?.(nodeId, requestPasteTreeClipboard);
+    if (unregister) onCleanup(unregister);
+  },
+  { immediate: true },
+);
 
 onBeforeUnmount(() => {
   handleMouseLeave();
-  if (sidebarTreeContext?.unregisterPasteHandler) {
-    sidebarTreeContext.unregisterPasteHandler(props.node.id);
-  }
+  stopPasteHandlerRegistration();
   finishTableReferenceDrag();
 });
 
