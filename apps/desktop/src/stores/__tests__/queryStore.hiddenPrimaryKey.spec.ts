@@ -173,6 +173,63 @@ describe("queryStore hidden primary key editing", () => {
     expect(tab.queryEditabilityReason).toBeUndefined();
   });
 
+  it("keeps a keyless Oracle query editable when its WHERE clause reads another table", async () => {
+    getConnectionConfig.mockReturnValue({ id: "oracle-1", name: "Oracle", db_type: "oracle", database: "ORCL", query_timeout_secs: 30 });
+    getColumns.mockResolvedValue([
+      { name: "ID", data_type: "NUMBER", is_nullable: false, column_default: null, is_primary_key: false, extra: null },
+      { name: "CUSTOMER_NO", data_type: "NUMBER", is_nullable: true, column_default: null, is_primary_key: false, extra: null },
+    ]);
+    listObjects.mockResolvedValue([{ name: "PLATFORM_CARS", object_type: "TABLE", schema: "APP" }]);
+    analyzeEditableQueryEditability.mockImplementation(async (sql: string) => {
+      const hidden = sql.includes("__DBX_PK_0");
+      return {
+        editable: true,
+        analysis: {
+          schema: "APP",
+          tableName: "PLATFORM_CARS",
+          tableAlias: "t",
+          selectStar: !hidden,
+          columns: hidden
+            ? [
+                { star: true, sourceQualifier: "t", sourceKey: "t:0", resultName: "*", expression: "t.*" },
+                { resultName: "__DBX_PK_0", expression: "ROWIDTOCHAR(ROWID)" },
+              ]
+            : [],
+        },
+      };
+    });
+    executeMulti.mockResolvedValue([
+      {
+        columns: ["ID", "CUSTOMER_NO", "__DBX_PK_0"],
+        rows: [[72, 2100196, "AAAPr9AAEAAAACXAAA"]],
+        affected_rows: 0,
+        execution_time_ms: 1,
+      },
+    ]);
+
+    const sql = "SELECT t.* FROM APP.PLATFORM_CARS t WHERE t.CUSTOMER_NO IN (SELECT c.CUSTOMER_NO FROM APP.CUSTOMERS c WHERE c.ENABLED = 1)";
+    const { useQueryStore } = await import("@/stores/queryStore");
+    const store = useQueryStore();
+    const tabId = store.createTab("oracle-1", "ORCL", "Query");
+
+    await store.executeTabSql(tabId, sql);
+
+    expect(executeMulti).toHaveBeenCalledWith(
+      "oracle-1",
+      "ORCL",
+      'SELECT t.*, ROWIDTOCHAR(ROWID) AS "__DBX_PK_0" FROM APP.PLATFORM_CARS t WHERE t.CUSTOMER_NO IN (SELECT c.CUSTOMER_NO FROM APP.CUSTOMERS c WHERE c.ENABLED = 1)',
+      undefined,
+      expect.any(String),
+      expect.objectContaining({ timeoutSecs: 30 }),
+    );
+    const tab = store.tabs.find((item) => item.id === tabId)!;
+    expect(tab.result?.hidden_column_indexes).toEqual([2]);
+    await vi.waitFor(() => expect(tab.querySourceColumns).toEqual(["ID", "CUSTOMER_NO", "__DBX_ROWID"]));
+    expect(tab.queryAnalysis).toBeDefined();
+    expect(tab.queryAnalysis?.allowInsertDelete).not.toBe(false);
+    expect(tab.queryEditabilityReason).toBeUndefined();
+  });
+
   it("does not inject Oracle ROWID into keyless view queries", async () => {
     getConnectionConfig.mockReturnValue({ id: "oracle-1", name: "Oracle", db_type: "oracle", database: "ORCL", query_timeout_secs: 30 });
     getColumns.mockResolvedValue([
