@@ -5317,7 +5317,11 @@ function treeItemMenuItems(): ContextMenuItem[] {
           @keydown="onKeydown"
           @mousedown="onRowMouseDown"
           @mousemove="isDropTarget ? updateTarget($event, node.id, node.type) : undefined"
-          @mouseleave="clearTarget(node.id)"
+          @mouseenter="handleMouseEnter"
+          @mouseleave="
+            clearTarget(node.id);
+            handleMouseLeave();
+          "
         >
           <div v-if="showDropBefore" class="absolute right-2 top-0 h-0.5 bg-primary rounded-full pointer-events-none" :style="{ left: paddingLeft }" />
           <div v-if="showDropAfter" class="absolute right-2 bottom-0 h-0.5 bg-primary rounded-full pointer-events-none" :style="{ left: paddingLeft }" />
