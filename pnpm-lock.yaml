@@ -235,22 +235,22 @@ importers:
   packages/cli:
     optionalDependencies:
       '@dbx-app/cli-darwin-arm64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../cli-darwin-arm64
       '@dbx-app/cli-darwin-x64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../cli-darwin-x64
       '@dbx-app/cli-linux-arm64-gnu':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../cli-linux-arm64-gnu
       '@dbx-app/cli-linux-x64-gnu':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../cli-linux-x64-gnu
       '@dbx-app/cli-win32-arm64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../cli-win32-arm64
       '@dbx-app/cli-win32-x64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../cli-win32-x64
 
   packages/cli-darwin-arm64: {}
@@ -298,22 +298,22 @@ importers:
         version: 3.25.76
     optionalDependencies:
       '@dbx-app/mcp-darwin-arm64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../mcp-darwin-arm64
       '@dbx-app/mcp-darwin-x64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../mcp-darwin-x64
       '@dbx-app/mcp-linux-arm64-gnu':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../mcp-linux-arm64-gnu
       '@dbx-app/mcp-linux-x64-gnu':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../mcp-linux-x64-gnu
       '@dbx-app/mcp-win32-arm64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../mcp-win32-arm64
       '@dbx-app/mcp-win32-x64':
-        specifier: 0.4.35
+        specifier: 0.4.36
         version: link:../mcp-win32-x64
 
   packages/mcp-win32-arm64: {}
