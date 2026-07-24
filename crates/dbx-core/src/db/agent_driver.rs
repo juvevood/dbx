@@ -1656,7 +1656,7 @@ fn agent_java_args_with_extra_opts(
     .map(str::to_string)
     .collect::<Vec<_>>();
 
-    if agent_jar_path_matches_key(jar_path, "kingbase") || agent_jar_path_matches_key(jar_path, "informix") {
+    if agent_jar_path_matches_key(jar_path, "informix") {
         args.push("-Djava.net.preferIPv4Stack=true".to_string());
     }
 
@@ -1921,13 +1921,6 @@ mod tests {
         assert!(args.iter().any(|arg| arg == "-Dhttp.proxyHost="));
         assert!(args.iter().any(|arg| arg == "-Dhttps.proxyHost="));
         assert!(args.iter().any(|arg| arg == "-DsocksProxyHost="));
-    }
-
-    #[test]
-    fn agent_java_args_prefer_ipv4_for_kingbase() {
-        let args = agent_java_args("/tmp/dbx/drivers/kingbase/agent.jar");
-
-        assert!(args.iter().any(|arg| arg == "-Djava.net.preferIPv4Stack=true"));
     }
 
     #[test]
